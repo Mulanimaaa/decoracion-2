@@ -1,0 +1,209 @@
+import { GoogleGenAI, Modality, Chat, GenerateContentResponse } from "@google/genai";
+import { ImageFile, AspectRatio } from '../types';
+import { MODELS } from "../constants";
+
+// FIX: Use the correct environment variable for the API key as per the guidelines.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+export const fileToGenerativePart = (imageFile: ImageFile) => {
+  return {
+    inlineData: {
+      data: imageFile.base64,
+      mimeType: imageFile.mimeType,
+    },
+  };
+};
+
+export const redesignImage = async (
+    baseImage: ImageFile, 
+    prompt: string, 
+    styleImage?: ImageFile
+): Promise<string> => {
+    const parts: any[] = [fileToGenerativePart(baseImage)];
+    let fullPrompt: string;
+
+    if (styleImage) {
+        parts.push(fileToGenerativePart(styleImage));
+        fullPrompt = `**ROLE:** You are a highly specialized AI for virtual interior decoration. You are NOT an architect, engineer, or contractor. Your only job is to change the decor.
+
+**CORE DIRECTIVE:** Your primary and most critical task is to preserve the original room's architecture with 100% accuracy.
+
+**ANALYSIS PHASE:**
+1. First, analyze the user's uploaded room image (**Image 1**).
+2. Identify all permanent, structural elements. This includes, but is not limited to:
+    - Walls (position, shape, size)
+    - Windows (position, shape, size)
+    - Doors (position, shape, size)
+    - Columns and support beams
+    - Ceilings and floors
+    - Built-in fixtures that cannot be easily moved.
+
+**REDESIGN PHASE:**
+After completing the analysis, you will redecorate the room based on the user's prompt and the style reference (**Image 2**).
+
+**--- CRITICAL, NON-NEGOTIABLE RULES ---**
+
+1.  **ZERO ARCHITECTURAL MODIFICATION:** It is ABSOLUTELY FORBIDDEN to alter the structural elements identified in the Analysis Phase.
+    - DO NOT move walls.
+    - DO NOT change window or door placement or size.
+    - DO NOT add or remove columns.
+    - The output image's architecture MUST perfectly match the input image's architecture. There is ZERO tolerance for deviation.
+
+2.  **SCOPE OF ALLOWED CHANGES (DECORATION ONLY):**
+    - **You CAN change:** Furniture, rugs, paint color, wallpaper, lighting fixtures (lamps, chandeliers), curtains, plants, art, decorative objects.
+    - **You CANNOT change:** Anything that requires construction work.
+
+3.  **STYLE TRANSFER:**
+    - Apply the *aesthetic* (colors, textures, furniture styles) from the style reference image to the *existing layout* of the user's room.
+    - DO NOT copy the layout or architecture from the style reference.
+
+**USER'S REQUEST:** "${prompt}"
+
+**FINAL CHECK:** Before generating the final image, verify that no structural elements have been moved or altered from the original user's room image.`;
+    } else {
+        fullPrompt = `**ROLE:** You are a highly specialized AI for virtual interior decoration. You are NOT an architect, engineer, or contractor. Your only job is to change the decor.
+
+**CORE DIRECTIVE:** Your primary and most critical task is to preserve the provided room's architecture with 100% accuracy.
+
+**ANALYSIS PHASE:**
+1. First, analyze the user's uploaded room image.
+2. Identify all permanent, structural elements. This includes, but is not limited to:
+    - Walls (position, shape, size)
+    - Windows (position, shape, size)
+    - Doors (position, shape, size)
+    - Columns and support beams
+    - Ceilings and floors
+    - Built-in fixtures that cannot be easily moved.
+
+**REDESIGN PHASE:**
+After completing the analysis, redecorate the room based on the user's prompt.
+
+**--- CRITICAL, NON-NEGOTIABLE RULES ---**
+
+1.  **ZERO ARCHITECTURAL MODIFICATION:** It is ABSOLUTELY FORBIDDEN to alter the structural elements identified in the Analysis Phase.
+    - DO NOT move walls.
+    - DO NOT change window or door placement or size.
+    - DO NOT add or remove columns.
+    - The output image's architecture MUST perfectly match the input image's architecture. There is ZERO tolerance for deviation.
+
+2.  **SCOPE OF ALLOWED CHANGES (DECORATION ONLY):**
+    - **You CAN change:** Furniture, rugs, paint color, wallpaper, lighting fixtures (lamps, chandeliers), curtains, plants, art, decorative objects.
+    - **You CANNOT change:** Anything that requires construction work.
+
+**USER'S REQUEST:** "${prompt}"
+
+**FINAL CHECK:** Before generating the final image, verify that no structural elements have been moved or altered from the original user's room image.`;
+    }
+    
+    parts.push({ text: fullPrompt });
+
+    const response = await ai.models.generateContent({
+        model: MODELS.EDIT,
+        contents: { parts },
+        config: {
+            responseModalities: [Modality.IMAGE],
+        },
+    });
+
+    const firstPart = response.candidates?.[0]?.content?.parts?.[0];
+    if (firstPart && 'inlineData' in firstPart && firstPart.inlineData) {
+        return firstPart.inlineData.data;
+    }
+    throw new Error('No image was generated by the AI.');
+};
+
+export const integrateObject = async (
+    baseImage: ImageFile, 
+    objectImage: ImageFile,
+    prompt: string
+): Promise<string> => {
+    const parts: any[] = [
+        fileToGenerativePart(baseImage),
+        fileToGenerativePart(objectImage),
+        { text: `**ROLE:** You are an AI tool for placing objects into an existing room image.
+
+**CORE DIRECTIVE:** Your task is to seamlessly integrate the object from the second image into the room from the first image, while making ZERO changes to the room's architecture.
+
+**USER'S INSTRUCTION:** "${prompt}"
+
+**--- CRITICAL, NON-NEGOTIABLE RULES ---**
+
+1.  **ZERO ARCHITECTURAL MODIFICATION:** It is ABSOLUTELY FORBIDDEN to alter the room's permanent structure. Do not move or change walls, windows, doors, floors, or ceilings.
+2.  **MINIMAL IMPACT:** Only modify the smallest possible area of the room image needed to add the new object.
+3.  **PRESERVE EXISTING DECOR:** Do not remove or change existing furniture unless the user's instruction explicitly says to replace something.
+4.  **REALISM:** The added object must be placed realistically, considering scale, lighting, and perspective.` }
+    ];
+
+    const response = await ai.models.generateContent({
+        model: MODELS.EDIT,
+        contents: { parts },
+        config: {
+            responseModalities: [Modality.IMAGE],
+        },
+    });
+
+    const firstPart = response.candidates?.[0]?.content?.parts?.[0];
+    if (firstPart && 'inlineData' in firstPart && firstPart.inlineData) {
+        return firstPart.inlineData.data;
+    }
+    throw new Error('No image was generated by the AI for inpainting.');
+};
+
+
+export const generateImage = async (prompt: string, aspectRatio: AspectRatio): Promise<string> => {
+    const response = await ai.models.generateImages({
+        model: MODELS.GENERATE,
+        prompt: `${prompt}, on a solid white background, studio photography`,
+        config: {
+            numberOfImages: 1,
+            outputMimeType: 'image/jpeg',
+            aspectRatio,
+        },
+    });
+    
+    const generatedImage = response.generatedImages?.[0]?.image?.imageBytes;
+    if (generatedImage) {
+        return generatedImage;
+    }
+    throw new Error('Image generation failed.');
+};
+
+export const analyzeImage = async (image: ImageFile, prompt: string): Promise<string> => {
+    const parts = [fileToGenerativePart(image), { text: prompt }];
+    const response = await ai.models.generateContent({
+        model: MODELS.ANALYZE,
+        contents: { parts },
+    });
+    return response.text;
+};
+
+export const getDetailedPlan = async (prompt: string): Promise<string> => {
+    const response = await ai.models.generateContent({
+        model: MODELS.COMPLEX,
+        contents: prompt,
+        config: {
+            thinkingConfig: { thinkingBudget: 32768 },
+        }
+    });
+    return response.text;
+};
+
+let chat: Chat | null = null;
+export const startChat = () => {
+    chat = ai.chats.create({
+        model: MODELS.CHAT,
+        config: {
+            systemInstruction: "You are a friendly and helpful interior design assistant.",
+        },
+    });
+};
+
+// FIX: Correct the return type of `sendMessageToChat`. The type `GenerateContentStreamResult` is invalid.
+// The `chat.sendMessageStream` method returns a `Promise` that resolves to an `AsyncGenerator<GenerateContentResponse>`.
+export const sendMessageToChat = (message: string): Promise<AsyncGenerator<GenerateContentResponse>> => {
+    if (!chat) {
+        startChat();
+    }
+    if (!chat) throw new Error("Chat not initialized");
+    return chat.sendMessageStream({ message });
+};

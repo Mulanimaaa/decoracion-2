@@ -1,0 +1,5 @@
+{
+  "name": "AI Interior Designer",
+  "description": "An AI-powered interior design assistant. Upload a photo of your room, choose a style, and let AI redesign your space. Generate new design concepts, chat with an AI designer, and iteratively refine your vision with simple text prompts.",
+  "requestFramePermissions": []
+}
